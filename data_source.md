@@ -2,109 +2,81 @@
 
 ## Overview
 
-The BRAHMO Rules Engine operates entirely on the assessment dataset provided with the assignment. No external APIs, third-party datasets, or online clinical knowledge sources are used during pipeline execution.
+All 50 knowledge nodes, the 15-level hierarchy, the 7 user profiles, and the edges used in this
+project were **provided directly by Astroum AI** in the assessment's Setup Guide document
+("SEED DATA — ORGANIZATION + HIERARCHY", "SEED DATA — 7 USERS", "SEED DATA — 50 KNOWLEDGE NODES",
+"SEED DATA — EDGES"). No original clinical data collection, sourcing, or research was performed —
+this project consumes the seed dataset exactly as supplied, loaded verbatim into Supabase via the
+provided `schema.sql`/seed SQL.
+
+## Nature of the underlying content
+
+The seed data represents a **fictional hospital** ("Supra Multi-Specialty Hospital," `org_id =
+'supra'`) and fictional patients (e.g., "Rajan," "Padma," "Aadhya"). It is explicitly a synthetic
+dataset constructed for this assessment, not real patient records or an export from any real
+hospital system.
+
+That said, the *clinical facts embedded within* the synthetic protocols reflect genuine, publicly
+known medical knowledge — for example:
+- Warfarin + NSAID co-administration carrying elevated GI bleed risk is standard, widely
+  documented pharmacology (not something specific to this fictional hospital).
+- DVT prophylaxis timing conventions post-orthopaedic surgery, penicillin/cephalosporin
+  cross-reactivity percentages, and WHO's 5-moment hand hygiene framework are all real, general
+  clinical/public-health knowledge that the seed data's authors incorporated into fictional
+  hospital-specific policy language (e.g., specific drug brand names, specific dosing schedules
+  attributed to "Dr. Vikram" or "Supra policy").
+
+No claim is made that any specific dosing figure, named decision-maker, incident date, or
+hospital-specific numeric target (e.g., "88% hand hygiene compliance") in the seed data
+corresponds to a real, verifiable clinical source — these are illustrative details invented for
+the assessment's narrative, consistent with the assessment's own framing of "Supra Hospital" as a
+fictional example organization.
+
+## Schema and constraint modifications
+
+One schema-level deviation from the provided `schema.sql` was made during setup: the
+`UNIQUE(org_id, level_number, department)` constraint on `hierarchy_levels` was dropped, because
+the provided seed data itself violates it (three legitimate distinct sub-unit rows share
+`(supra, 8, ortho)`). This is a structural/schema fix, not a data-sourcing decision — documented in
+full in `docs/architecture.md`, section 5.
+
+## Summary
+
+| Item | Source |
+|---|---|
+| Hierarchy structure (15 levels, DAG edges) | Provided by Astroum AI, Setup Guide |
+| 50 knowledge nodes (content, tags, scores) | Provided by Astroum AI, Setup Guide |
+| 7 user profiles | Provided by Astroum AI, Setup Guide |
+| Underlying general clinical facts referenced within node content | Publicly known, standard medical/pharmacological knowledge (not independently re-verified against primary literature for this assessment) |
+| Hospital name, patient names, specific incident narratives, internal policy numbers | Fictional, assessment-authored illustrative content |
 
 ---
 
-## Source Dataset
+## Runtime Data Flow
 
-### Database Schema
+No external APIs, third-party datasets, or online clinical knowledge sources are queried during
+pipeline execution — everything below operates on the seed dataset described above, already
+loaded into Supabase via `schema.sql` and `seed.sql`.
 
-**Source**
+### `users` table
+Used for: user identification, role and department information, permission compilation, entry
+point resolution.
 
-```
-supabase/schema.sql
-```
+### `hierarchy_levels` table
+Used for: building the hospital hierarchy, BFS traversal (`parent_ids`), department-scoped
+traversal, multi-parent relationship handling (e.g. `HL-08-POST-TKR`).
 
-Defines the database schema, relationships, and constraints used by the application.
+### `knowledge_nodes` table
+Used for: candidate set generation, zone classification (Zone 1 department-specific / Zone 2
+global), compliance tag filtering, temporal (supersession/expiry) checks, and derivability
+filtering.
 
----
+### Derived data (not persisted)
+The following are computed fresh on each pipeline run and returned only in the API response —
+never written back to the database: entry point, reachable hierarchy set, candidate set, filter
+funnel counts, pipeline timing, summary metrics.
 
-### Assessment Dataset
-
-**Source**
-
-```
-supabase/seed.sql
-```
-
-Provides the sample organization, hospital hierarchy, users, departments, and clinical knowledge used throughout the pipeline.
-
----
-
-## Runtime Data Sources
-
-### User Data
-
-**Source**
-
-`user` table
-
-**Used for**
-
-- User identification
-- Role and department information
-- Permission evaluation
-- Entry point resolution
-
----
-
-### Hierarchy Data
-
-**Source**
-
-`hierarchy_level` table
-
-**Used for**
-
-- Building the hospital hierarchy
-- BFS traversal
-- Department-based traversal
-- Multi-parent hierarchy relationships
-
----
-
-### Clinical Knowledge
-
-**Source**
-
-`knowledge_node` table
-
-**Used for**
-
-- Candidate set generation
-- Zone classification
-- Compliance filtering
-- Supersession and derivability checks
-
----
-
-## Derived Data
-
-The following information is generated by the application during pipeline execution and is **not persisted back to the database**:
-
-- Entry Point
-- Reachable Hierarchy
-- Candidate Set
-- Filter Funnel Counts
-- Pipeline Timing
-- Summary Metrics
-
-These values exist only for the duration of a pipeline execution and are returned as part of the API response to the frontend. The underlying database remains unchanged throughout the execution of the pipeline.
-
-## Frontend Data
-
-The React frontend does not access the database directly. It retrieves processed results from the FastAPI backend through the REST API.
-
-Endpoints used:
-
-- `GET /users`
-- `GET /candidate-set/{user_id}`
-
----
-
-## External Data Sources
-
-None.
-
-All clinical data used by the application originates from the assessment dataset provided in `schema.sql` and `seed.sql`.
+### Frontend access
+The React frontend never queries Supabase directly. All data is retrieved from the FastAPI
+backend via REST endpoints (e.g. `GET /users`, `GET /candidate-set/{user_id}`), which in turn
+query the database and run the pipeline described above.
